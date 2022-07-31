@@ -26,6 +26,7 @@ type Expression<Type extends PrimitiveType> = {
         $type: 'column' | 'literal' | 'derived' | 'targetElement',
         type: Type,
     },
+    as: <Label extends string>(label: Label) => LabeledExpression<Type, Expression<Type>, Label>;
 } & ExpressionMethods<Type>;
 
 type ExpressionMethods<Type extends PrimitiveType> =
@@ -56,33 +57,33 @@ type ExpressionMethods<Type extends PrimitiveType> =
     or: (rhs: Expression<boolean> | boolean) => Expression<boolean>;
 } : never;
 
-type Literal<Type extends PrimitiveType> = Expression<Type> & {
+type Literal<Type extends PrimitiveType> = {
     __meta__: {
         $type: 'literal',
         value: Type,
         type: Type,
     };
     as: <Label extends string>(label: Label) => LabeledExpression<Type, Literal<Type>, Label>;
-}
+} & Expression<Type>
 
-type Column<T extends Class, K extends Key, Type extends PrimitiveType> = Expression<Type> & {
+type Column<T extends Class, K extends Key, Type extends PrimitiveType> = {
     __meta__: {
         $type: 'column',
         key: K,
         type: Type,
     },
     as: <Label extends string>(label: Label) => LabeledExpression<Type, Column<T, K, Type>, Label>;
-}
+} & Expression<Type>;
 
 type Columns<T extends Class> = Column<T, any, any>[];
 
-type Derived<T extends Class, K extends Key, Type extends PrimitiveType> = Expression<Type> & {
+type Derived<T extends Class, K extends Key, Type> = {
     __meta__: {
         $type: 'derived',
         key: K,
         type: Type,
     }
-}
+};
 
 type Expressions = Expression<PrimitiveType>[];
 
@@ -99,10 +100,24 @@ type TargeListT = TargetElementT[];
 
 type BooleanExpressions = Expression<boolean>[];
 
+/**
+ * Shim type to create an understandable error message.
+ */
+interface NonPrimitiveTypeAttribute<T extends Class, key> {
+    __nonPrimitive: true,
+}
+
+/**
+ * Shim type to create an understandable error message.
+ */
+interface FunctionTypeAttribute<T extends Class, key> {
+    __function: true,
+}
+
 type ModelAttributes<T extends Class> = {
     [key in keyof InstanceType<T>]: key extends keyof BareAttributes<InstanceType<T>>
-        ? Column<T, key, InstanceType<T>[key]>
-        : Derived<T, key, InstanceType<T>[key]>
+        ? (InstanceType<T>[key] extends PrimitiveType ?  Column<T, key, InstanceType<T>[key]> : NonPrimitiveTypeAttribute<T, key>)
+        : (InstanceType<T>[key] extends Function ? FunctionTypeAttribute<T, key> : Derived<T, key, InstanceType<T>[key]>)
 };
 
 type Entity<T extends Class> = T & ModelAttributes<T> & {objects: Statement<T, [], []>};
@@ -140,22 +155,32 @@ class UserModel {
     firstName: string;
     lastName: string;
     age: number;
+    foo: {a: number};
 
     get isMajor(): boolean {
         return this.age > 18;
     }
+
+    get infos(): {a: number} {
+        return {
+            a: this.age,
+        }
+   }
+
+   doSomething() {
+
+   }
 }
 
 const User = define(UserModel);
 
 const result = User.objects
-    .load(User.firstName.as('foo'), literal(1).as('value'), User.id)
+    .load(User.firstName.as('foo'), literal(1).plus(User.age).as('value'))
     .filter(
         User.id.gt(1),
         User.id.plus(12).gte(12),
     ).filter(
         User.firstName.contains("foo").or(User.age.ls(10)),
-        User.isMajor,
         User.age.ls(10),
         User.id.ls(10),
     ).groupBy(
